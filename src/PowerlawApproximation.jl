@@ -72,7 +72,7 @@ function fig1(
         xscale=xscale,
         yscale=yscale,
         xlabel=xlabel,
-        ylabel=ylabel,
+        #ylabel=ylabel,
         xminorticksvisible=true,
         xminorticks=IntervalsBetween(9),
         yminorticksvisible=true,
@@ -143,15 +143,13 @@ function fig2(
     yscale=log10,
     xlabel="Time (s)",
     ylabel="Amplitude (a.u.)",
-    size=(300, 1500),
+    size=(360, 1000),
     dur=1e1,
-    ylims=(1e-5, 5e0),
-    xlims=(1/fs / 10, dur * 10),
+    ylims=(yscale == identity ? 0.01 : 1e-3, yscale == identity ? 1.1e0 : 5e0),
+    xlims=(xscale == identity ? 0.0 : 1/fs / 10, xscale == identity ? β*3e1 : dur * 10),
     fig=Figure(; size=size), 
     colorscheme=:glasgow,
-    plot_kernel_pl=true,
-    plot_kernel_pea=true,
-    plot_kernel_pea_components=true,
+    base=10.0,
 )
     # Create time vector & compute PEA
     t = timevec(dur, fs)
@@ -167,7 +165,7 @@ function fig2(
             xscale=xscale,
             yscale=yscale,
             xlabel=xlabel,
-            ylabel=ylabel,
+            #ylabel=ylabel,
             xminorticksvisible=true,
             xminorticks=IntervalsBetween(9),
             yminorticksvisible=true,
@@ -177,33 +175,35 @@ function fig2(
         #   1) horizontal gridline at 0.5
         #   2) vertical gridline at β
         #   3) vertical gridline at τᵢ
-        hlines!(ax, [0.5]; color=:gray)
-        vlines!(ax, [β]; color=:red)
+        # hlines!(ax, [0.5]; color=:gray)
+        vlines!(ax, [β]; color=:black, linewidth=0.5)
         vlines!(ax, [τ[i]]; color=colors[i])
 
+        # Compute each component of the PEA
+        kernel_pl = pl.(t[2:end], β)
+        gᵢ = c[i] .* g[i][2:end]
+        ĝ = sum(c[1:i] .* g[1:i])[2:end]
+
         # Optionally, plot each component of the PEA
-        if plot_kernel_pea_components
-            lines!(ax, t[2:end], c[i] .* g[i][2:end]; color=colors[i], label=string(round(τ[i]*1e3)) * " ms")
-        end
-
-        # Optionally, plot composite PEA kernel
-        if plot_kernel_pea
-            lines!(ax, t[2:end], sum(c[1:i] .* g[1:i])[2:end]; color=:pink, linestyle=:dash)
-        end
-
-        # Optionally, plot PL kernel
-        if plot_kernel_pl
-            lines!(ax, t[2:end], pl.(t[2:end], β); color=:red)
-        end
+        t_highlight = (t .> (τ[i] ^ base)) .& (t .> (τ[i] ^ -base))
+        lines!(ax, t[2:end], kernel_pl; color=:black, linewidth=0.5)
+        lines!(ax, t[2:end], gᵢ; color=colors[i], label=string(round(τ[i]*1e3)) * " ms")
+        lines!(ax, t[2:end], ĝ; color=:pink)
 
         # Hide extraneous stuff
         if i < length(τ)
-            hidexdecorations!(ax, ticks=false, grid=false)
+            hidexdecorations!(ax, ticks=false, grid=false, minorticks=false)
         end
 
         # Adjust limits
         ylims!(ax, ylims)
         xlims!(ax, xlims)
+
+        # Text
+        text!(ax, [1e2], [1.0]; text="$(round(1e5*loss(kernel_pl, ĝ; fs=fs); digits=5))", align=(:right, :bottom))
+
+        # Adjust spacing
+        rowgap!(fig.layout, Relative(2e-3))
     end
     fig
 end
