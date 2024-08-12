@@ -81,6 +81,7 @@ function fig1(
         yminorticks=IntervalsBetween(9),
     ),
     colorscheme=:glasgow,
+    plot_legend=false,
 )
     # Create time vector & compute PEA
     t = timevec(dur, fs)
@@ -93,7 +94,7 @@ function fig1(
 
     # Start figure with reference lines:
     #   1) horizontal gridline at 0.5
-    hlines!(ax, [0.5]; linestyle=:dash, color=:gray)
+    # hlines!(ax, [0.5]; linestyle=:dash, color=:gray)
 
     # Plot results:
     #   1) Approximation components in colored lines, matching to legend
@@ -110,7 +111,27 @@ function fig1(
     xlims!(ax, xlims)
     
     # Add legend
-    axislegend(ax)
+    if plot_legend axislegend(ax) end
+    fig
+end
+
+# Convenient methods for fig1
+fig1(; kwargs...) = fig1(calc_optim(1e-2)[1:2]...; kwargs...)
+
+# Figure 2
+# Show Figure 1, but over multiple linear time scales
+function fig2(args...; β=1e-2, timescales=[(0.0, β), (0.0, 10*β), (0.0, 100*β)], kwargs...)
+    # Fit parameters using calc_optim
+    opt = calc_optim(β)
+
+    # Create overall figure
+    fig = Figure(; size=(1000, 300))
+
+    # Loop and create each individual axis and plot over requested time scale
+    for (idx, ts) in enumerate(timescales)
+        ax = Axis(fig[1, idx])
+        fig1(opt[1:2]...; β=β, dur=ts[2], fig=fig, ax=ax, xlims=ts, ylims=(0.0, 1.0))
+    end
     fig
 end
 
