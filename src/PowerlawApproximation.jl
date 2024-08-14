@@ -1,15 +1,39 @@
 module PowerlawApproximation
 
+# TODO: consider whether ζ and gain parameter are both needed?
+# TODO: Figure out why simulations with β >> 1e-2 struggle (dur? fs? others?)
+# 
+
 using AuditorySignalUtils
 using CairoMakie
 using Colors
 using ColorSchemes
 using Optim
 using Trapz
+using FFTW
+using DSP
+using Distributed
 
 include("profile.jl")
+include("proofs.jl")
 
-export pl, e, pea, pea2, fig1, fig2, loss, calc_optim
+export pl, e, pea, pea2, pea_components, fig1, fig2, fig3, fig4, fig5, fig6, loss, calc_optim_s1, calc_optim_s2, calc_optim_s3, calc_optim_s4, @parallel
+
+# Convenient macro to set up parallel compute
+macro parallel(n=4)
+    quote
+        using Distributed
+        if nprocs() == nworkers() == 1
+            addprocs($n)
+        elseif nworkers() < $n
+            addprocs($n - nworkers())
+        end
+        @everywhere using Pkg
+        @everywhere Pkg.activate(".")
+        @everywhere using PowerlawApproximation
+        @info "Parallel pool established with $(nworkers()) workers, PowerlawApproximation.jl loaded!"
+    end
+end
 
 # Compute power-law function `pl` or exponential function `e`
 pl(t, β) = β / (t + β)
@@ -20,9 +44,13 @@ e(t, τ) = exp(-t/τ)
 pea(t, τ, w=ones(length(τ))) = sum(map(x -> x[2] .* e.(t, x[1]), zip(τ, w)))
 pea_components(t, τ, w=ones(length(τ))) = map(x -> x[2] .* e.(t, x[1]), zip(τ, w))
 
-# Compute simple squared error loss computed with trapezoidal integration
-function loss(t, x, y)
-    trapz((t), (y .- x) .^ 2)
+# Compute SSE loss
+function loss(t, x, y; scale=identity)
+    if scale == identity
+        sum((y .- x).^2)
+    else
+        trapz((log.(t[2:end])), (log.(y[2:end]) .- log.(x[2:end])).^2)
+    end
 end
 
 # Numerically optimize ζ parameter (SCHEME 1)
@@ -30,34 +58,125 @@ end
 # and weights w where w = (1/τ)^ζ. ζ is an unknown adjustment factor that adjusts weights
 # to better match the power-law kernel. Here, it is optimized numerically with Optim.jl
 # and then the used τ, final w, and ζ are reported. 
-function calc_optim(β=1e-2; base=10.0, start=0, step=1/exp(1), stop=3, fs=10e3)
+function calc_optim_s1(
+    β=1e-2; 
+    dur=1e3β, 
+    base=10.0, 
+    start=0, 
+    step=1/exp(1), 
+    stop=3,
+    fs=10e3, 
+    scale=log
+)
     # Determine time constants
     τ = β .* base .^ collect(start:step:stop)
 
     # Set initial parameters and bounds
-    ζ = 0.2
+    ζ = 10^-0.05
     w = 1 ./ τ
 
     # Synthesize time vector and pl kernel
-    t = timevec(10.0, fs)
+    t = timevec(dur, fs)
     kernel = pl.(t, β)
 
     # Define loss function
-    f = x -> loss(t, kernel, β .* sum(pea_components(t, τ, w .^ x[1]))) 
+    f = x -> loss(t, kernel, β .* sum(pea_components(t, τ, w .^ x[1])); scale=scale) 
 
     # Compute minimization
     ζ̂ = Optim.minimizer(optimize(f, [ζ]))
     
     # Return results (for convenience, return τ, w, and ζ)
-    τ, w .^ ζ̂, ζ̂
+    τ, w .^ ζ̂, ζ̂[1]
 end
+
+# Numerically optimize ζ parameter (SCHEME 2)
+# We approximate the power-law kernel with exponential kernels with time constants τ:
+#   τ = 1/(tᵢ + β)
+# where:
+#   tᵢ = β .* base .^ (start:step:stop)
+# and weights w:
+#   w = (1/(exp(-tᵢ/τᵢ) τ_i))^ζ 
+# ζ is an unknown adjustment factor that adjusts weights to better match the power-law
+# kernel. Here, it is optimized numerically with Optim.jl and then the used τ, final w, and
+# ζ are reported. 
+function calc_optim_s2(
+    β=1e-2; 
+    dur=1e3β, 
+    base=10.0,
+    start=0, 
+    step=1/exp(1), 
+    stop=3, 
+    fs=10e3, 
+    scale=identity
+)
+    # Determine time anchors t and resulting time constants β
+    anchors = β .* base .^ collect(start:step:stop)
+    τ = β .+ anchors
+
+    # Set initial parameters and bounds
+    ζ = 0.75
+    w = 1 ./ (exp.(-anchors ./τ) .* τ)
+
+    # Synthesize time vector and pl kernel
+    t = timevec(dur, fs)
+    kernel = pl.(t, β)
+
+    # Define loss function
+    f = x -> loss(t, kernel, β .* sum(pea_components(t, τ, w .^ x[1])); scale=scale)
+
+    # Compute minimization
+    ζ̂ = Optim.minimizer(optimize(f, [ζ]))
+    
+    # Return results (for convenience, return τ, w, and ζ)
+    τ, w .^ ζ̂[1], ζ̂[1]
+end
+
+# calc_optim_s4
+# We approximate the power-law kernel with exponential kernels with time constants τ
+# and weights w. Time constants are forced to be:
+#   τ = β .* 10 .^ (0:1/exp(1):3)
+# but weights are free and numerically optimized.
+# In this scheme, optimization is performed in log-log space with uniform sampling in
+# log time. This allows for a much more efficient evaluation of the optimization loss
+# function with minimal loss in fidelity. Moreover, we provide use forward 
+# auto-differentation to improve the optimization's accuracy
+function calc_optim_s4(
+    β=1e-2; 
+    dur=1e3β, 
+    base=10.0, 
+    start=0, 
+    step=1/exp(1), 
+    stop=3,
+)
+    # Determine time constants
+    τ = β .* base .^ collect(start:step:stop)
+
+    # Set initial parameters and bounds
+    w = 1 ./ (τ .+ β)
+
+    # Synthesize time vector and pl kernel
+    t = LinRange(log(1e-4), log(dur), 1000)
+    kernel = log.(pl.(exp.(t), β))
+
+    approx(τ, w) = log.(β .* sum(pea_components(exp.(t), τ, exp.(w))))
+
+    # Define loss function
+    f = w -> loss(t, kernel, approx(τ, w))
+
+    # Compute minimization
+    ŵ = Optim.minimizer(optimize(f, log.(w); autodiff=:forward))
+    
+    # Return results (for convenience, return τ, w, and ζ)
+    τ, exp.(ŵ)
+end
+
 
 # Figure 1
 # Show target power-law kernel and approximation, as well as each component contributing
 # to the fit, on a log-log scale.
 function fig1(
-    τ,
-    w;
+    τ::Vector,
+    w::Vector;
     β=1e-2, 
     fs=10e3, 
     xscale=log10, 
@@ -85,25 +204,36 @@ function fig1(
 )
     # Create time vector & compute PEA
     t = timevec(dur, fs)
-    g_comp = β .* pea_components(t, τ, w)
-    g = β .* pea(t, τ, w)
+    if length(τ) > 0
+        g_comp = β .* pea_components(t, τ, w)
+        g = β .* pea(t, τ, w)
+    end
     f = pl.(t, β)
 
     # Select colors for each τᵢ
-    colors = get(colorschemes[colorscheme], LinRange(0.0, 1.0, length(τ)))
+    if length(τ) == 1 || length(τ) == 0
+        colors = [:black]
+    else
+        colors = get(colorschemes[colorscheme], LinRange(0.0, 1.0, length(τ)))
+    end
 
     # Start figure with reference lines:
     #   1) horizontal gridline at 0.5
     # hlines!(ax, [0.5]; linestyle=:dash, color=:gray)
+    # vlines!(ax, τ; color=colors)
 
     # Plot results:
     #   1) Approximation components in colored lines, matching to legend
     #   2) Composite approximation in pink
     #   3) Target in red
-    map(zip(g_comp, τ, colors)) do (gᵢ, τᵢ, colorᵢ)
-        lines!(ax, t[2:end], gᵢ[2:end]; color=colorᵢ, label=string(round(τᵢ*1e3)) * " ms")
+    if length(τ) > 0
+        map(zip(g_comp, τ, colors)) do (gᵢ, τᵢ, colorᵢ)
+            lines!(ax, t[2:end], gᵢ[2:end]; color=colorᵢ, label=string(round(τᵢ*1e3)) * " ms")
+        end
     end
-    lines!(ax, t[2:end], g[2:end]; color=:pink, linestyle=:dash)
+    if length(τ) > 1
+        lines!(ax, t[2:end], g[2:end]; color=:gray, linestyle=:dash)
+    end
     lines!(ax, t[2:end], f[2:end]; color=:red)
 
     # Adjust limits
@@ -116,13 +246,17 @@ function fig1(
 end
 
 # Convenient methods for fig1
-fig1(; kwargs...) = fig1(calc_optim(1e-2)[1:2]...; kwargs...)
+fig1(β::Float64=1e-2; scheme=calc_optim_s1, kwargs...) = fig1(scheme(β)[1:2]...; β=β, kwargs...)
+function fig1(β::Float64, ζ::Float64; base=10.0, start=0, step=1/exp(1), stop=3, kwargs...) 
+    τ = β .* base .^ (start:step:stop)
+    fig1(τ, 1 ./ τ .^ ζ; β=β, kwargs...)
+end
 
 # Figure 2
 # Show Figure 1, but over multiple linear time scales
-function fig2(args...; β=1e-2, timescales=[(0.0, β), (0.0, 10*β), (0.0, 100*β)], kwargs...)
+function fig2(args...; scheme=calc_optim_s1, β=1e-2, timescales=[(0.0, β), (0.0, 10*β), (0.0, 100*β)], kwargs...)
     # Fit parameters using calc_optim
-    opt = calc_optim(β)
+    opt = scheme(β)
 
     # Create overall figure
     fig = Figure(; size=(1000, 300))
@@ -132,6 +266,139 @@ function fig2(args...; β=1e-2, timescales=[(0.0, β), (0.0, 10*β), (0.0, 100*�
         ax = Axis(fig[1, idx])
         fig1(opt[1:2]...; β=β, dur=ts[2], fig=fig, ax=ax, xlims=ts, ylims=(0.0, 1.0))
     end
+    fig
+end
+
+# Figure 3
+# Show that optimization of ζ is well posed
+function fig3(β=1e-2; base=10.0, start=0, step=1/exp(1), stop=3, fs=10e3, scale=log, yscale=identity)
+    # Determine time constants
+    τ = β .* base .^ collect(start:step:stop)
+
+    # Set initial parameters and bounds
+    w = 1 ./ τ
+
+    # Synthesize time vector and pl kernel
+    t = timevec(10.0, fs)
+    kernel = pl.(t, β)
+
+    # Define loss function (from scalar-valued x to scalar-valued loss)
+    f = x -> loss(t, kernel, β .* sum(pea_components(t, τ, w .^ x)); scale=scale) 
+
+    # Calculate losses
+    Ζ = LogRange(2e-1, 2e0, 51)
+    losses = map(f, Ζ)
+
+    # Plot
+    fig = Figure()
+    ax = Axis(
+        fig[1, 1]; 
+        xscale=log10, 
+        xminorticksvisible=true, 
+        xminorticks=IntervalsBetween(9),
+        yscale=yscale,
+    )
+    lines!(ax, Ζ, losses; color=:black)
+
+    # Add vertical indicator for ζ estimate from `calc_optim`
+    opt = calc_optim_s1(β; base=base, start=start, step=step, stop=stop, fs=fs, scale=scale)
+    vlines!(ax, [opt[3]]; color=:red)
+    
+    # Add labels, adjust ticks, etc.
+    ax.ylabel = "Loss (log-scaled)"
+    ax.xlabel = "ζ (a.u.)"
+    fig
+end
+
+# Figure 4
+# Show relationship between β and ζ
+function fig4(B=LogRange(1e-3, 1e-1, 15); scheme=calc_optim_s1, kwargs...)
+    # Grab each estimate of ζ
+    Z = map(x -> scheme(x; kwargs...)[3], B)
+
+    # Create figure
+    fig = Figure()
+    ax = Axis(
+        fig[1, 1],
+        xscale=log10,
+        yscale=log10,
+        xminorticksvisible=true,
+        xminorticks=IntervalsBetween(9),
+        yminorticksvisible=true,
+        yminorticks=IntervalsBetween(9),
+    )
+
+    # Plot
+    scatter!(ax, B, Z)
+
+    # Adjust labels, ticks, etc.
+    ax.xlabel = "β (s)"
+    ax.ylabel = "ζ (a.u.)"
+
+    fig
+end
+
+# Figure 5
+# Show relationship between β and loss metric
+function fig5(B=LogRange(1e-3, 1e-1, 21); dur=1e1, fs=10e3, scheme=calc_optim_s1, kwargs...)
+    # Grab loss for each β
+    losses = map(B) do β 
+        t = timevec(1000β, fs)
+        k = pl.(t, β)
+        loss(t, k, β .* pea(t, scheme(β; kwargs...)[1:2]...); scale=log10)
+    end
+
+    # Create figure
+    fig = Figure()
+    ax = Axis(
+        fig[1, 1],
+        xscale=log10,
+        xminorticksvisible=true,
+        xminorticks=IntervalsBetween(9),
+    )
+
+    # Plot
+    scatter!(ax, B, losses)
+
+    # Adjust labels, ticks, etc.
+    ax.xlabel = "β (s)"
+    ax.ylabel = "ζ (a.u.)"
+
+    fig
+end
+
+# Figure 6
+# Show relationships for base, step, stop
+function fig6(; β=1e-2, dur=1e1)
+    # Figure
+    fig = Figure()
+
+    # Effect of base
+    steps = LogRange(1e-1, 1e0, 51)
+    losses = pmap(steps) do step
+        # Synthesize time vector and pl kernel
+        t = LinRange(log(1e-4), log(dur), 1000)
+        kernel = log.(pl.(exp.(t), β))
+
+        # Define loss function
+        τ, w = calc_optim_s4(β; base=10.0, step=step, stop=3.0)
+        approx = log.(β .* sum(pea_components(exp.(t), τ, w)))
+        loss(t, kernel, approx)
+    end
+
+    ax = Axis(
+        fig[1, 1]; 
+        xscale=log10, 
+        yscale=log10, 
+        yminorticksvisible=true, 
+        yminorticks=IntervalsBetween(9)
+    )
+    lines!(ax, steps, losses; color=:black)
+    ax.xlabel = "Exponent step size"
+    ax.ylabel = "Log-log scale loss"
+    step_min = steps[argmin(losses)]
+    vlines!(ax, [step_min]; color=:red)
+    text!(ax, [step_min*1.02], [1e1]; text="$(round(step_min; digits=3))", color=:red)
     fig
 end
 
