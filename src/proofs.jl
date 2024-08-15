@@ -2,7 +2,7 @@
 #
 # Various simple figures showing graphical equivalents of certain useful proofs
 
-export proof_decay_and_cutoff, proof_decay_vs_tau, proof_approximate_vs_exact_ω
+export proof_decay_and_cutoff, proof_decay_vs_tau, proof_approximate_vs_exact_ω, proof_filt_vs_direct, proof_match_kernel_match_adapt
 
 # Useful identities/relations
 τ_to_f(τ) = 1/(2π * τ)
@@ -10,6 +10,7 @@ f_to_τ(f) = 1/(2π * f)
 f_to_ω(f, fs) = 2π * f / fs
 ω_to_d(ω) = cos(ω) - 1 + sqrt(cos(ω)^2 - 4*cos(ω) + 3)
 τ_to_d(τ, fs) = ω_to_d(f_to_ω(τ_to_f(τ), fs))
+τ_to_d_quick(τ, fs) = 1 - exp(-1/fs / τ)
 
 # proof_decay_and_cutoff()
 # Visual proof of relationship between decay coefficient and cutoff frequency
@@ -59,6 +60,8 @@ function proof_decay_vs_tau(τ; fs=10e3)
     lines!(ax, t, y)
     vlines!(ax, [τ])
     hlines!(ax, [1/exp(1)])
+    xlims!(ax, 0.0, 5τ)
+    ax.title = string(d)
     fig
 end
 
@@ -75,5 +78,91 @@ function proof_approximate_vs_exact_ω(; fs=100e3)
     lines!(ax, T, 1 .- D_approximate; color=:gray, linestyle=:dash)
     ax.xlabel = "τ (s)"
     ax.ylabel = "d (a.u.)"
+    fig
+end
+
+# proof_filt_vs_direct()
+function proof_filt_vs_direct(τ=1e-2; fs=10e3)
+    # Calc time vector 
+    t = timevec(1.0, fs)
+
+    # Convert τ to decay coefficients
+    d = τ_to_d_quick(τ, fs)
+    b = [1]
+    a = [1, -(1-d)]
+    x = vcat(1.0, zeros(Int(fs)-1))
+    y1 = filt(b, a, x)
+
+    # Do direct
+    y2 = zeros(size(y1))
+    for i in eachindex(y1)
+        if i == 1
+            y2[i] = x[i]
+        else
+            y2[i] = x[i] + (1-d)*y2[i-1]
+        end
+    end
+
+    fig = Figure()
+    ax = Axis(fig[1, 1])
+    lines!(ax, t, y1)
+    lines!(ax, t, y2; linestyle=:dash)
+    xlims!(ax, 0.0, 5τ)
+    vlines!(ax, [τ])
+    hlines!(ax, [1/exp(1)])
+    fig
+end
+
+# proof_match_kernel_match_adapt
+function proof_match_kernel_match_adapt(β=5e-4; fs=10e3)
+    # Create time axis 
+    t = timevec(1.0, fs)
+
+    # Select automatically perfect inputs
+    τ, w = calc_optim_s2(β)
+    d = τ_to_d_quick.(τ, fs)
+
+    # Input: constant unit amplitude
+    x = ones(samples(1.0, fs))
+
+    # # Algorithm #1: PLA
+    I = zeros(length(x))
+    y_pla = zeros(length(x))
+    for i in eachindex(y_pla)
+        I[i] = sum(y_pla[1:i] ./ (t[i] .- t[1:i] .+ β)) * (1/fs)
+        y_pla[i] = max(x[i] - I[i], 0.0)
+    end
+    I_pla = I
+    I_pla_conv = conv(y_pla, 1 ./ (t .+ β))
+
+    # Algorithm #2: PEA
+    I = 0.0
+    I_pea = zeros(size(x))
+    E = zeros(length(τ))
+    y_pea = zeros(length(x))
+    for i in eachindex(y_pea)
+        y_pea[i] = max(x[i] - I, 0.0)
+        for j = 1:length(τ)
+            if i == 1
+                E[j] = y_pea[i]
+            else
+                E[j] = y_pea[i] + (1-d[j]) * E[j]
+            end
+        end
+        I = 1/fs * sum(w .* E)
+        I_pea[i] = I
+    end
+
+    # Plot
+    fig = Figure()
+    ax = Axis(fig[1, 1])
+    lines!(ax, t, I_pla)
+    lines!(ax, t, I_pla_conv[1:Int(fs)] ./ fs; color=:red, linestyle=:dash)
+    lines!(ax, t, I_pea)
+    xlims!(ax, 0.0, 5β)
+    ax = Axis(fig[1, 2])
+    lines!(ax, t, y_pla)
+    lines!(ax, t, y_pea)
+    xlims!(ax, 0.0, 5β)
     fig
 end

@@ -53,11 +53,11 @@ function loss(t, x, y; scale=identity)
     end
 end
 
-# Numerically optimize ζ parameter (SCHEME 1)
+# calc_optim_s1 (SCHEME 1)
 # We approximate the power-law kernel with exponential kernels with time constants τ
+#   t = β .* 10 .^ (0:1/exp(1):3)
 # and weights w where w = (1/τ)^ζ. ζ is an unknown adjustment factor that adjusts weights
-# to better match the power-law kernel. Here, it is optimized numerically with Optim.jl
-# and then the used τ, final w, and ζ are reported. 
+# to better match the power-law kernel. 
 function calc_optim_s1(
     β=1e-2; 
     dur=1e3β, 
@@ -65,111 +65,118 @@ function calc_optim_s1(
     start=0, 
     step=1/exp(1), 
     stop=3,
-    fs=10e3, 
-    scale=log
+    init_mode="τ",
 )
     # Determine time constants
     τ = β .* base .^ collect(start:step:stop)
 
     # Set initial parameters and bounds
-    ζ = 10^-0.05
-    w = 1 ./ τ
+    if init_mode == "τ"
+        w = 1 ./ τ
+    elseif init_mode == "τ + β"
+        w = 1 ./ (τ .+ β)
+    end
 
     # Synthesize time vector and pl kernel
-    t = timevec(dur, fs)
-    kernel = pl.(t, β)
+    t = LinRange(log(1e-4), log(dur), 1000)
+    kernel = log.(pl.(exp.(t), β))
+
+    # Define function to compute approximation given τ and w
+    approx(τ, w, ζ) = log.(β .* sum(pea_components(exp.(t), τ, w .^ ζ)))
 
     # Define loss function
-    f = x -> loss(t, kernel, β .* sum(pea_components(t, τ, w .^ x[1])); scale=scale) 
+    f = ζ -> loss(t, kernel, approx(τ, w, ζ[1]))
 
-    # Compute minimization
-    ζ̂ = Optim.minimizer(optimize(f, [ζ]))
+    # Compute optimization and return minimizer
+    ζ̂ = Optim.minimizer(optimize(f, [0.8]; autodiff=:forward))[1]
     
     # Return results (for convenience, return τ, w, and ζ)
-    τ, w .^ ζ̂, ζ̂[1]
+    τ, w .^ ζ̂, ζ̂
 end
 
-# Numerically optimize ζ parameter (SCHEME 2)
-# We approximate the power-law kernel with exponential kernels with time constants τ:
-#   τ = 1/(tᵢ + β)
-# where:
-#   tᵢ = β .* base .^ (start:step:stop)
-# and weights w:
-#   w = (1/(exp(-tᵢ/τᵢ) τ_i))^ζ 
-# ζ is an unknown adjustment factor that adjusts weights to better match the power-law
-# kernel. Here, it is optimized numerically with Optim.jl and then the used τ, final w, and
-# ζ are reported. 
-function calc_optim_s2(
-    β=1e-2; 
-    dur=1e3β, 
-    base=10.0,
-    start=0, 
-    step=1/exp(1), 
-    stop=3, 
-    fs=10e3, 
-    scale=identity
-)
-    # Determine time anchors t and resulting time constants β
-    anchors = β .* base .^ collect(start:step:stop)
-    τ = β .+ anchors
-
-    # Set initial parameters and bounds
-    ζ = 0.75
-    w = 1 ./ (exp.(-anchors ./τ) .* τ)
-
-    # Synthesize time vector and pl kernel
-    t = timevec(dur, fs)
-    kernel = pl.(t, β)
-
-    # Define loss function
-    f = x -> loss(t, kernel, β .* sum(pea_components(t, τ, w .^ x[1])); scale=scale)
-
-    # Compute minimization
-    ζ̂ = Optim.minimizer(optimize(f, [ζ]))
-    
-    # Return results (for convenience, return τ, w, and ζ)
-    τ, w .^ ζ̂[1], ζ̂[1]
-end
-
-# calc_optim_s4
+# calc_optim_s2 (SCHEME 2)
 # We approximate the power-law kernel with exponential kernels with time constants τ
 # and weights w. Time constants are forced to be:
 #   τ = β .* 10 .^ (0:1/exp(1):3)
 # but weights are free and numerically optimized.
-# In this scheme, optimization is performed in log-log space with uniform sampling in
-# log time. This allows for a much more efficient evaluation of the optimization loss
-# function with minimal loss in fidelity. Moreover, we provide use forward 
-# auto-differentation to improve the optimization's accuracy
-function calc_optim_s4(
+function calc_optim_s2(
     β=1e-2; 
     dur=1e3β, 
     base=10.0, 
     start=0, 
     step=1/exp(1), 
     stop=3,
+    init_mode="τ",
 )
     # Determine time constants
     τ = β .* base .^ collect(start:step:stop)
 
     # Set initial parameters and bounds
-    w = 1 ./ (τ .+ β)
+    if init_mode == "τ"
+        w = 1 ./ τ
+    elseif init_mode == "τ + β"
+        w = 1 ./ (τ .+ β)
+    end
 
     # Synthesize time vector and pl kernel
     t = LinRange(log(1e-4), log(dur), 1000)
     kernel = log.(pl.(exp.(t), β))
 
+    # Define function to compute approximation given τ and w
     approx(τ, w) = log.(β .* sum(pea_components(exp.(t), τ, exp.(w))))
 
     # Define loss function
     f = w -> loss(t, kernel, approx(τ, w))
 
-    # Compute minimization
-    ŵ = Optim.minimizer(optimize(f, log.(w); autodiff=:forward))
+    # Compute optimization and return minimizer
+    optimize(f, log.(w), Newton(); autodiff=:forward)
+    # ŵ = Optim.minimizer(optimize(f, log.(w); autodiff=:forward))
     
     # Return results (for convenience, return τ, w, and ζ)
-    τ, exp.(ŵ)
+    # τ, exp.(ŵ)
 end
 
+# calc_optim_s1 (SCHEME 1)
+# We approximate the power-law kernel with exponential kernels with time constants τ
+#   t = β .* 10 .^ (0:1/exp(1):3)
+# and weights w where w = (1/τ)^ζ. ζ is an unknown adjustment factor that adjusts weights
+# to better match the power-law kernel. 
+function calc_optim_s3(
+    β=1e-2; 
+    dur=1e3β, 
+    base=10.0, 
+    start=0,
+    step=1/exp(1), 
+    stop=3,
+    init_mode="τ",
+)
+    # Determine time constants
+    anchors = β .* base .^ collect(start:step:stop)
+    τ = β .+ anchors
+
+    # Set initial parameters and bounds
+    if init_mode == "τ"
+        w = 1 ./ τ
+    elseif init_mode == "τ + β"
+        w = 1 ./ (τ .+ β)
+    end
+
+    # Synthesize time vector and pl kernel
+    t = LinRange(log(1e-4), log(dur), 1000)
+    kernel = log.(pl.(exp.(t), β))
+
+    # Define function to compute approximation given τ and w
+    approx(τ, w, ζ) = log.(β .* sum(pea_components(exp.(t), τ, w .^ ζ)))
+
+    # Define loss function
+    f = ζ -> loss(t, kernel, approx(τ, w, ζ[1]))
+
+    # Compute optimization and return minimizer
+    ζ̂ = Optim.minimizer(optimize(f, [0.8]; autodiff=:forward))[1]
+    
+    # Return results (for convenience, return τ, w, and ζ)
+    τ, w .^ ζ̂, ζ̂
+end
 
 # Figure 1
 # Show target power-law kernel and approximation, as well as each component contributing
@@ -201,6 +208,7 @@ function fig1(
     ),
     colorscheme=:glasgow,
     plot_legend=false,
+    plot_τ=false,
 )
     # Create time vector & compute PEA
     t = timevec(dur, fs)
@@ -220,7 +228,7 @@ function fig1(
     # Start figure with reference lines:
     #   1) horizontal gridline at 0.5
     # hlines!(ax, [0.5]; linestyle=:dash, color=:gray)
-    # vlines!(ax, τ; color=colors)
+    if plot_τ vlines!(ax, τ; color=colors, linewidth=0.25) end
 
     # Plot results:
     #   1) Approximation components in colored lines, matching to legend
@@ -401,5 +409,8 @@ function fig6(; β=1e-2, dur=1e1)
     text!(ax, [step_min*1.02], [1e1]; text="$(round(step_min; digits=3))", color=:red)
     fig
 end
+
+# Figures needed:
+# - with optimized w, what are best τ lower and upper given dur?
 
 end # module PowerlawApproximation
