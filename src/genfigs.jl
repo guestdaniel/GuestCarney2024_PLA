@@ -26,20 +26,24 @@ saveplot(name, fig) = save(projectdir("figs", name), fig; px_per_unit=3)
 set_theme!()
 
 # Figure 1
+# Figure depicting the basic principles of approximating power-law kernel with a weighted
+# sum of exponential kernels
 β = 1e-2
 sz = (250, 200)
+
 fig = fig1([1e-2], [1/β]; β=β, size=sz, xlims=(5e-4, 1.1e1), ylims=(5e-4, 5.0))
 vlines!([β]; color=:gray)
 text!([β*1.1], [1.0]; text="β=$β s", color=:gray)
 saveplot("fig1a.png", fig)
+
 fig = fig1([1e-2], [1/β]; β=β, size=sz, xscale=identity, yscale=identity, ylims=(0.0, 1.0), xlims=(0.0, 5β))
 vlines!([β]; color=:gray)
 text!([β + 1e-3], [0.85]; text="β=$β s", color=:gray)
 saveplot("fig1b.png", fig)
 
-# Figure 2?
-β = 1e-2
 τ = β .* 10 .^ (0.0:0.5:3)
 w = 1 ./ τ
 fig = fig1(τ, w; size=(sz[1]*1.7, sz[2]*1.7), xlims=(1e-4, 1e2), dur=50.0)
 saveplot("fig1c.png", fig)
+
+# Figs 2+ are generated in MATLAB

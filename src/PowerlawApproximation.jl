@@ -1,9 +1,5 @@
 module PowerlawApproximation
 
-# TODO: consider whether ζ and gain parameter are both needed?
-# TODO: Figure out why simulations with β >> 1e-2 struggle (dur? fs? others?)
-# 
-
 using AuditorySignalUtils
 using CairoMakie
 using Colors
@@ -14,10 +10,16 @@ using FFTW
 using DSP
 using Distributed
 
-include("profile.jl")
 include("proofs.jl")
 
-export pl, e, pea, pea2, pea_components, fig1, fig2, fig3, fig4, fig5, fig6, loss, calc_optim_s1, calc_optim_s2, calc_optim_s3, calc_optim_s4, @parallel
+# Export basic kernel/approximator functions
+export pl, e, pea, pea_components
+# Export figure generation functions
+export fig1, fig2, fig3, fig4, fig5, fig6
+# Export optimization functions
+export loss, calc_optim_s1, calc_optim_s2, calc_optim_s3, calc_optim_s4
+# Export Distributed setup macro
+export @parallel
 
 # Convenient macro to set up parallel compute
 macro parallel(n=4)
@@ -129,53 +131,10 @@ function calc_optim_s2(
     f = w -> loss(t, kernel, approx(τ, w))
 
     # Compute optimization and return minimizer
-    optimize(f, log.(w), Newton(); autodiff=:forward)
-    # ŵ = Optim.minimizer(optimize(f, log.(w); autodiff=:forward))
+    ŵ = Optim.minimizer(optimize(f, log.(w); autodiff=:forward))
     
     # Return results (for convenience, return τ, w, and ζ)
-    # τ, exp.(ŵ)
-end
-
-# calc_optim_s1 (SCHEME 1)
-# We approximate the power-law kernel with exponential kernels with time constants τ
-#   t = β .* 10 .^ (0:1/exp(1):3)
-# and weights w where w = (1/τ)^ζ. ζ is an unknown adjustment factor that adjusts weights
-# to better match the power-law kernel. 
-function calc_optim_s3(
-    β=1e-2; 
-    dur=1e3β, 
-    base=10.0, 
-    start=0,
-    step=1/exp(1), 
-    stop=3,
-    init_mode="τ",
-)
-    # Determine time constants
-    anchors = β .* base .^ collect(start:step:stop)
-    τ = β .+ anchors
-
-    # Set initial parameters and bounds
-    if init_mode == "τ"
-        w = 1 ./ τ
-    elseif init_mode == "τ + β"
-        w = 1 ./ (τ .+ β)
-    end
-
-    # Synthesize time vector and pl kernel
-    t = LinRange(log(1e-4), log(dur), 1000)
-    kernel = log.(pl.(exp.(t), β))
-
-    # Define function to compute approximation given τ and w
-    approx(τ, w, ζ) = log.(β .* sum(pea_components(exp.(t), τ, w .^ ζ)))
-
-    # Define loss function
-    f = ζ -> loss(t, kernel, approx(τ, w, ζ[1]))
-
-    # Compute optimization and return minimizer
-    ζ̂ = Optim.minimizer(optimize(f, [0.8]; autodiff=:forward))[1]
-    
-    # Return results (for convenience, return τ, w, and ζ)
-    τ, w .^ ζ̂, ζ̂
+    τ, exp.(ŵ)
 end
 
 # Figure 1
@@ -376,7 +335,7 @@ function fig5(B=LogRange(1e-3, 1e-1, 21); dur=1e1, fs=10e3, scheme=calc_optim_s1
 end
 
 # Figure 6
-# Show relationships for base, step, stop
+# Show relationships for base, step, stop using numerical optimization
 function fig6(; β=1e-2, dur=1e1)
     # Figure
     fig = Figure()
@@ -409,8 +368,5 @@ function fig6(; β=1e-2, dur=1e1)
     text!(ax, [step_min*1.02], [1e1]; text="$(round(step_min; digits=3))", color=:red)
     fig
 end
-
-# Figures needed:
-# - with optimized w, what are best τ lower and upper given dur?
 
 end # module PowerlawApproximation
