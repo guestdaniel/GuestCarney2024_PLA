@@ -6,8 +6,8 @@
 # The "theory" and numerical optimization code is all written in Julia and conveniently
 # provided by this package. The "testing" code where the approximation scheme is tested
 # in practice is written in MATLAB because the target wrapper system is Mex. That code
-# is included here in the folder `matlab`. The underlying model code, of course, is written
-# in C, and is included in `src\models`.
+# is included here in the folder `src\matlab`. The underlying model code, of course, is written
+# in C, and is included in `src\c`.
 #
 # A NOTE ON FIGURE SIZES:
 # Plot sizes are initially specified in pixels, but implicitly we assume that because we 
