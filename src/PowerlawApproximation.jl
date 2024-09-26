@@ -15,9 +15,11 @@ include("proofs.jl")
 # Export basic kernel/approximator functions
 export pl, e, pea, pea_components
 # Export figure generation functions
-export fig1, fig2, fig3, fig4, fig5, fig6
-# Export optimization functions
-export loss, calc_optim_s1, calc_optim_s2, calc_optim_s3, calc_optim_s4
+export fig1, fig2, fig3, fig4, fig5, fig6, fig7
+# Export weight optimization functions
+export loss, calc_optim_s1, calc_optim_s2
+# Export heuristic weight functions
+export calc_heuristic_s1
 # Export Distributed setup macro
 export @parallel
 
@@ -137,6 +139,21 @@ function calc_optim_s2(
     τ, exp.(ŵ)
 end
 
+# Calc heuristic approximation to the weights
+function calc_heuristic_s1(
+    β=1e-2; 
+    base=10.0, 
+    start=0, 
+    step=1/exp(1), 
+    stop=3,
+)
+    τ = β .* base .^ (start:step:stop)
+    w = 1 ./ (τ .+ β)
+    c = 2β * sum(w .* exp.(-β ./ τ))
+    w = w ./ c
+    return τ, w
+end
+
 # Figure 1
 # Show target power-law kernel and approximation, as well as each component contributing
 # to the fit, on a log-log scale.
@@ -150,9 +167,9 @@ function fig1(
     xlabel="Time (s)",
     ylabel="Amplitude (a.u.)",
     size=(1000, 700),
-    dur=1e1,
+    dur=β*1e3,
     ylims=(1e-5, 5e0),
-    xlims=(1/fs / 10, dur * 10),
+    xlims=(β*1e-1, β*1e3),
     fig=Figure(; size=size), 
     ax=Axis(
         fig[1, 1]; 
@@ -168,9 +185,14 @@ function fig1(
     colorscheme=:glasgow,
     plot_legend=false,
     plot_τ=false,
+    timevec_mode="log",
 )
     # Create time vector & compute PEA
-    t = timevec(dur, fs)
+    if timevec_mode == "linear"
+        t = timevec(dur, fs)
+    else
+        t = exp.(LinRange(log(1e-4), log(dur), 1000))
+    end
     if length(τ) > 0
         g_comp = β .* pea_components(t, τ, w)
         g = β .* pea(t, τ, w)
@@ -190,9 +212,10 @@ function fig1(
     if plot_τ vlines!(ax, τ; color=colors, linewidth=0.25) end
 
     # Plot results:
-    #   1) Approximation components in colored lines, matching to legend
-    #   2) Composite approximation in pink
-    #   3) Target in red
+    #   1) Target in red
+    #   2) Approximation components in colored lines, matching to legend
+    #   3) Composite approximation in pink
+    lines!(ax, t[2:end], f[2:end]; color=:red)
     if length(τ) > 0
         map(zip(g_comp, τ, colors)) do (gᵢ, τᵢ, colorᵢ)
             lines!(ax, t[2:end], gᵢ[2:end]; color=colorᵢ, label=string(round(τᵢ*1e3)) * " ms")
@@ -201,11 +224,23 @@ function fig1(
     if length(τ) > 1
         lines!(ax, t[2:end], g[2:end]; color=:gray, linestyle=:dash)
     end
-    lines!(ax, t[2:end], f[2:end]; color=:red)
 
     # Adjust limits
     ylims!(ax, ylims)
     xlims!(ax, xlims)
+
+    # Add loss value to upper right
+    l = loss(t, log.(f), log.(g))
+    text!(ax, [xlims[2]/1.1], [1.0]; text=string(round(l; digits=2)), align=(:right, :bottom), color=:gray)
+
+    # If size is small enough, skip every other xtick and ytick
+    start = floor(log10(xlims[1]))
+    stop = ceil(log10(xlims[2]))
+    ticks = (start:1:stop)
+
+#    if size[1] > 300
+#        ax.xticks = 10 .^ ticks#, "10^−" .* string.(ticks))
+#    end
     
     # Add legend
     if plot_legend axislegend(ax) end
@@ -366,6 +401,43 @@ function fig6(; β=1e-2, dur=1e1)
     step_min = steps[argmin(losses)]
     vlines!(ax, [step_min]; color=:red)
     text!(ax, [step_min*1.02], [1e1]; text="$(round(step_min; digits=3))", color=:red)
+    fig
+end
+
+# Figure 7
+# Show effects of maximum time for the loss function on the result of numerically optimized
+# PLA weights
+function fig7(β=1e-2; fs=10e3)
+    # Determine settings
+    maxdurs = LogRange(1e0, 1e4, 30)
+    stops = 1:1:5
+
+    # Compute time vector with log-spaced samples
+    L = map(stops) do stop
+        map(maxdurs) do maxdur
+            t = LogRange(1/fs, maxdur, 1000)
+            τ, w = calc_optim_s2(; stop=stop, dur=maxdur)
+            k = log.(pl.(t, β))
+            k̂ = log.(β .* sum(pea_components(t, τ, w)))
+            loss(t, k, k̂)
+        end
+    end
+
+    # Plot loss as figure
+    fig = Figure()
+    ax = Axis(fig[1, 1]; xscale=log10, yscale=log10)
+    map(zip(L, stops)) do (ll, stop)
+        lines!(ax, maxdurs, ll; label=string(stop))
+    end
+
+    axislegend()
+
+    ylims!(ax, 1e-2, 1e7)
+    xlims!(ax, 1e-1, 1e5)
+
+    ax.xlabel = "Upper limit of time in loss function (s)"
+    ax.ylabel = "Loss"
+
     fig
 end
 

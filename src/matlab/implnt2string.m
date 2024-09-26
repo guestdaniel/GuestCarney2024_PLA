@@ -5,7 +5,9 @@ function implntstring = implnt2string(implnt)
 		case 1
 			implntstring = "True PLA";
 		case 2
-			implntstring = "Parllel exponential PLA";
+			implntstring = "Parallel exponential PLA (numerically optimized)";
+		case 3
+			implntstring = "Parallel exponential PLA (heuristic)";
 	end
 end
 

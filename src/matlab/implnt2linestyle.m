@@ -6,6 +6,8 @@ function color = implnt2linestyle(implnt)
 			color = "--";
 		case 2
 			color = "-";
+		case 3
+			color = ":";
 	end
 end
 

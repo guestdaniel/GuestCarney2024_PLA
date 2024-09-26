@@ -2,7 +2,7 @@
 #
 # Various simple figures showing graphical equivalents of certain useful proofs
 
-export proof_decay_and_cutoff, proof_decay_vs_tau, proof_approximate_vs_exact_ω, proof_filt_vs_direct, proof_match_kernel_match_adapt
+export proof_decay_and_cutoff, proof_decay_vs_tau, proof_approximate_vs_exact_ω, proof_filt_vs_direct, proof_decay_quick, proof_match_kernel_match_adapt
 
 # Useful identities/relations
 τ_to_f(τ) = 1/(2π * τ)
@@ -62,6 +62,27 @@ function proof_decay_vs_tau(τ; fs=10e3)
     hlines!(ax, [1/exp(1)])
     xlims!(ax, 0.0, 5τ)
     ax.title = string(d)
+    fig
+end
+
+# Proof for "quick" calculation of d as exp(-1/(fₛ * τ)) versus more exact form above
+function proof_decay_quick(τ; fs=10e3)
+    # Create stimulus and responses
+    unit_impulse = vcat(1.0, zeros(Int(fs)-1))
+    d1 = τ_to_d(τ, fs)
+    d2 = τ_to_d_quick(τ, fs)
+
+    # Determine filter coefs
+    b = [1.0]
+    a1 = [1.0, -(1-d1)]
+    a2 = [1.0, -(1-d2)]
+
+    # Create figure
+    fig = Figure()
+    ax = Axis(fig[1, 1])
+    t = timevec(1.0, fs)
+    lines!(ax, t, filt(b, a1, unit_impulse))
+    lines!(ax, t, filt(b, a2, unit_impulse))
     fig
 end
 

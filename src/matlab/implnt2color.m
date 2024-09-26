@@ -6,6 +6,8 @@ function color = implnt2color(implnt)
 			color = "#000000";
 		case 2
 			color = "#0bb4ff";
+		case 3
+			color = "#0bb4ff";
 	end
 end
 

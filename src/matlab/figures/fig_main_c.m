@@ -2,11 +2,11 @@
 % Figure depicting performance benefits of PLA approximation schemes.
 
 % Configure stimulus and simulation parameters
-durs = 1e-2 .* 2 .^ (0.0:0.5:10.0);   % simulation durations (s)
-n_rep = 10;                          % number of repeats
-fs = 100e3;                          % sampling rate (Hz)
+durs = 1e-2 .* 2 .^ (0.0:0.5:11.0);   % simulation durations (s)
+n_rep = 10;                           % number of repeats
+fs = 100e3;                           % sampling rate (Hz)
 n_dur = length(durs);
-implnts = [0, 1, 2];                 % PLA mode (old, true, new)
+implnts = [0, 1, 2];                  % PLA mode (old, true, new)
 n_implnt = length(implnts);
 
 % Pre-allocate storage
@@ -21,9 +21,9 @@ for idx_dur = 1:n_dur
 		% Loop over repeats
 		for idx_rep = 1:n_rep
 			% Time execution of IHC part
-			tic; 
-			sim_ihc_zbc2014(zeros(1, round(durs(idx_dur)*fs)), 1000.0); 
-			runtimes_ihc(idx_dur, idx_implnt, idx_rep) = toc; 
+% 			tic; 
+% 			sim_ihc_zbc2014(zeros(1, round(durs(idx_dur)*fs)), 1000.0); 
+% 			runtimes_ihc(idx_dur, idx_implnt, idx_rep) = toc; 
 
 			% Time execution of ANF part
 			tic; 
@@ -57,7 +57,9 @@ for idx_implnt = 1:n_implnt
 end
 
 % Plot unity line
-plot(10 .^ (-3.0:0.01:3.0), 10 .^ (-3.0:0.01:3.0), 'k'); hold off;  % plot unity line
+x = 10 .^ (0:0.01:1.0);
+plot(x, x ./ 2e2, 'k');                   % plot O(n) line
+plot(x, x .^ 2 ./ 2e1, 'k'); hold off;    % plot O(n^2) line
 
 % Add text labels for comparisons
 % mu_true = mean(runtimes_anf(end, idxs_implnts(1), :), 3);
@@ -69,7 +71,7 @@ grid on;
 set(gca, "xscale", "log");
 set(gca, "yscale", "log");
 ylim([1e-3, 1e2]);
-xlim([5e-2, 2e1]);
+xlim([3e-2, 2e1]);
 xlabel("Stimulus duration (s)");
 ylabel("Compute time (s)");
 xticks([1e-2 1e-1 1e0 1e1]);

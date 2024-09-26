@@ -11,7 +11,7 @@ cf = 10e3;                             % tone frequency (Hz)
 fibertype = 3;                         % HSR fiber
 species = 1;                           % cat model
 noisetype = 0;		                   % no fGn
-implnts = [0, 1, 2];                   % PLA mode (old, true, new)
+implnts = [0, 1, 2, 3];                % PLA mode (old, true, new)
 n_implnt = length(implnts);
 fs = 100e3;                            % sampling rate (Hz)
 
@@ -118,7 +118,7 @@ set(ax_stim, "Xlim", [0 1.35]);
 set(ax_sim, "Xlim", [0 1.35]);
 
 % Add legend
-legend(["Old approximate PLA", "True PLA", "Parallel exponential PLA"]);
+legend(arrayfun(@(x) implnt2string(x), implnts));
 
-export_at_size(gcf, "figs\fig2a.png", [7, 4], 600);
+export_at_size(gcf, "figs\fig2a.png", [4.5, 2.5], 600);
 end

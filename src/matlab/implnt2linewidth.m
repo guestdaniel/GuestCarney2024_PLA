@@ -6,6 +6,8 @@ function color = implnt2linewidth(implnt)
 			color = 2;
 		case 2
 			color = 1;
+		case 3
+			color = 1;
 	end
 end
 
