@@ -45,7 +45,7 @@ saveplot("fig1b.png", fig)
 
 τ = β .* 10 .^ (0.0:0.5:3)
 w = 1 ./ τ
-fig = fig1(τ, w; size=(sz[1]*1.7, sz[2]*1.7), xlims=(1e-4, 1e2), dur=50.0)
+fig = fig1(τ, w; size=(sz[1]*1.2, sz[2]*1.2), xlims=(1e-4, 1e2), dur=50.0)
 saveplot("fig1c.png", fig)
 
 # Fig 2

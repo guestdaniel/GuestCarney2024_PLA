@@ -185,6 +185,7 @@ function fig1(
     colorscheme=:glasgow,
     plot_legend=false,
     plot_τ=false,
+    plot_l=false,
     timevec_mode="log",
 )
     # Create time vector & compute PEA
@@ -231,7 +232,9 @@ function fig1(
 
     # Add loss value to upper right
     l = loss(t, log.(f), log.(g))
-    text!(ax, [xlims[2]/1.1], [1.0]; text=string(round(l; digits=2)), align=(:right, :bottom), color=:gray)
+    if plot_l
+        text!(ax, [xlims[2]/1.1], [1.0]; text=string(round(l; digits=2)), align=(:right, :bottom), color=:gray)
+    end
 
     # If size is small enough, skip every other xtick and ytick
     start = floor(log10(xlims[1]))
