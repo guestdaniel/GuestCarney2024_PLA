@@ -2,7 +2,7 @@
 This is the repository for code necessary to reproduce the analyses and figures reported in:
 
 ```
-Guest, D. R. and Carney, L. H. (2024). "A fast and accurate approximation of power-law adaptation for auditory computational models (L)." The Journal of the Acoustical Society of America, XX(XX), XX—XX, doi:XXX.
+Guest, D. R., & Carney, L. H. (2024). A fast and accurate approximation of power-law adaptation for auditory computational models. The Journal of the Acoustical Society of America, 156(6), 3954-3957. https://doi.org/10.1121/10.0034457
 ```
 
 Corresponding author: Daniel Guest (daniel_guest@urmc.rochester.edu, https://github.com/guestdaniel)
